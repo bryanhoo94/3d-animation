@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>3D 形象预览</title>
+<!-- 3d-animation 的预览页：一只（或并排几只比「有毛 / 没毛」）＋ 一排动作按钮。要放哪只、几只，写在旁边的 config.js。
+     同一个文件夹里要有：config.js、kit.js、motion.js、avatar.js、three.module.min.js、模型文件、原图缩略图（tools/assemble.sh 会凑齐）。
+     截图口子：?pose=<json> 摆一个静止的姿势；window.avatarDraw(pose)；window.avatarShot(px, pose, small) 出一张透明底的 PNG（帧图用）。 -->
+<style>
+:root{--page:#151412;--inner:#1d1b18;--line:#2c2924;--ink:#f3ead8;--ink-2:#c4bba9;--hot:#4a6f50}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--page);color:var(--ink);display:grid;grid-template-rows:1fr auto;
+  font:400 .875rem/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,"PingFang SC","Noto Sans SC",sans-serif}
+#stage{display:grid;place-items:center;align-content:center;min-height:0;position:relative;padding-top:56px}
+#pair{width:min(96vw,calc((100svh - 200px) * var(--n) * 8 / 11),calc(var(--n) * 620px))}
+#c{display:block;width:100%;aspect-ratio:calc(var(--n) * 8) / 11;cursor:pointer;touch-action:manipulation}
+#c.off{display:none}
+#still{display:none;gap:4%;padding:0 2%}
+#still.on{display:flex}
+#still img{flex:1;min-width:0;aspect-ratio:1;border-radius:24px}
+.tags{display:grid;grid-template-columns:repeat(var(--n),1fr);margin-top:8px}
+.tags div{display:flex;align-items:center;justify-content:center;gap:10px;color:var(--ink-2)}
+.tags img{width:40px;height:40px;border-radius:10px;object-fit:cover;outline:1px solid var(--line)}
+#links{position:absolute;top:16px;right:16px;display:flex;gap:8px}
+#links a{height:36px;display:inline-flex;align-items:center;padding:0 14px;border-radius:999px;
+  background:var(--inner);border:1px solid var(--line);color:var(--ink-2);text-decoration:none}
+#links a:hover{color:var(--ink)}
+#links a:focus-visible{outline:2px solid var(--ink-2);outline-offset:2px}
+#ui{display:flex;justify-content:center;padding:16px 16px 28px}
+.seg{display:inline-flex;flex-wrap:wrap;justify-content:center;padding:4px;gap:4px;border-radius:24px;background:var(--inner);border:1px solid var(--line)}
+.seg button{height:36px;min-width:64px;padding:0 16px;border:0;border-radius:999px;background:transparent;
+  color:var(--ink-2);font:inherit;cursor:pointer}
+.seg button[aria-pressed=true]{background:var(--hot);color:var(--ink)}
+.seg button:focus-visible{outline:2px solid var(--ink-2);outline-offset:2px}
+@media (max-width:420px){.seg button{min-width:0;padding:0 12px}}
+body.shot{display:block;background:transparent}
+body.shot #ui,body.shot .tags,body.shot #links{display:none}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="links"></div>
+  <div id="pair">
+    <canvas id="c" role="img"></canvas>
+    <div id="still"></div>
+    <div class="tags"></div>
+  </div>
+</div>
+<div id="ui"><div class="seg" role="group" aria-label="动作"></div></div>
+<script type="module">
+import * as THREE from './three.module.min.js';
+import { buildAvatar, FUR_PARAMS, POSE0 } from './kit.js';
+import { createMotion, O3K } from './motion.js';
+import { mountAvatar } from './avatar.js';
+import * as CFG from './config.js';
+
+const { TITLE, SHOW, OPT = {}, LINKS = [] } = CFG;
+
+const $ = s => document.querySelector(s), esc = s => String(s).replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
+document.title = TITLE;
+document.documentElement.style.setProperty('--n', SHOW.length);
+const cv = $('#c');
+cv.setAttribute('aria-label', `${TITLE}：${SHOW.map(s => s.label).join('、')}，同一套动作；点它会跳起来笑`);
+$('#still').innerHTML = SHOW.map(s => `<img src="${esc(s.ref)}" alt="${esc(s.label)} 原图">`).join('');
+$('.tags').innerHTML = SHOW.map(s => `<div><img src="${esc(s.ref)}" alt="" title="原图">${esc(s.label)}</div>`).join('');
+$('#links').innerHTML = LINKS.map(l => `<a href="${esc(l.href)}">${esc(l.label)}</a>`).join('');
+
+const M = SHOW[0].model;                 // 并排的几只吃同一份姿势：动作用第一只的 KEY / ACTIONS
+const motion = createMotion({ POSE0, KEY: M.KEY, ACTIONS: M.ACTIONS });
+const btns = Object.entries(motion.actions).map(([k, a]) => {
+  const b = document.createElement('button'); b.dataset.s = k; b.textContent = a.label; b.setAttribute('aria-pressed', k === 'idle');
+  $('.seg').append(b); return b;
+});
+const press = s => { for (const b of btns) b.setAttribute('aria-pressed', b.dataset.s === s); };
+
+const shot = new URLSearchParams(location.search).has('shot');
+if (shot) document.body.classList.add('shot');
+let av;
+try {
+  const models = SHOW.map(s => buildAvatar(THREE, s.model.SPEC, { skin: s.skin, detail: OPT.detail, shells: OPT.shells ?? 40 }));   // detail 不写就用 SPEC.detail
+  av = mountAvatar({ THREE, canvas: cv, models, motion, intro: !shot });
+} catch (e) { cv.classList.add('off'); $('#still').classList.add('on'); throw e; }
+
+for (const b of btns) b.addEventListener('click', () => { press(b.dataset.s); av.set(b.dataset.s, () => press('idle')); });
+
+/* 截图口子 */
+const q = new URLSearchParams(location.search).get('pose');
+if (q || shot) av.still(JSON.parse(q || '{}'));
+window.avatarDraw = p => av.still(p);
+/* 某个动作停住时的姿势（截图用）；做一次的动作没有停住的那格，取做到一半那一刻 */
+window.avatarStill = name => { const a = motion.actions[name];
+  return a?.kind === 'once' ? { ...POSE0, ...a.play(a.dur * 0.45, M.KEY, O3K) } : motion.still(name); };
+/* 一张 px 宽、透明底的 PNG（只画第一只）：先画 2 倍大再对半缩 —— 毛是硬边 discard，不超采样全是锯齿。
+   small：帧图那档的毛（粗一点、乱一点，缩小了还看得出是毛） */
+window.avatarShot = (px, pose = {}, small = false) => {
+  const m = av.models[0], keep = { ...m.P }, ren = av.renderer, T = m.camera.tall;
+  if (small && m.fur) Object.assign(m.P, M.SPEC.fur?.small ?? FUR_PARAMS.small);
+  const w = px * 2, h = Math.round(w * T), full = Math.round(w * (2 * T - 1));
+  const cam = new THREE.PerspectiveCamera(m.camera.fov, 1, 1, 30);
+  cam.position.set(...m.camera.pos); cam.lookAt(...m.camera.at);
+  cam.fov = 2 * Math.atan(Math.tan(m.camera.fov / 2 * Math.PI / 180) * full / w) * 180 / Math.PI;
+  cam.aspect = w / full; cam.setViewOffset(w, full, 0, 0, w, h); cam.updateProjectionMatrix();
+  const s = new THREE.Scene(), parent = m.root.parent; s.add(m.root);
+  ren.setScissorTest(false); ren.setPixelRatio(1); ren.setSize(w, h, false); ren.setViewport(0, 0, w, h);
+  m.apply(pose); ren.render(s, cam);
+  const big = document.createElement('canvas'); big.width = w; big.height = h; big.getContext('2d').drawImage(cv, 0, 0);
+  const out = document.createElement('canvas'); out.width = px; out.height = Math.round(px * T);
+  const g = out.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(big, 0, 0, out.width, out.height);
+  Object.assign(m.P, keep); parent?.add(m.root);
+  return out.toDataURL('image/png');
+};
+window.avatarReady = true;
+</script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+interface:
+  display_name: "3D Animation"
+  short_description: "把形象图做成会动的 3D（有毛 / 没毛，网页 ＋ App）"
+  default_prompt: "Use $3d-animation to turn this mascot image into an animated 3D avatar for web and app."
